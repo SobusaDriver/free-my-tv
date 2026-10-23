@@ -102,7 +102,7 @@ final class HomeData {
     }
 
     static String coinName(int i) {
-        return i == 3 ? Ui.tr("Dollar") : COIN_NAMES[i];
+        return i == 3 ? "USDT" : COIN_NAMES[i];
     }
 
     /** 0 = raining now, >0 = hours until the next rain, -1 = no rain in the hourly forecast. */
