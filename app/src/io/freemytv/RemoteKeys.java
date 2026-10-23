@@ -95,6 +95,7 @@ final class RemoteKeys {
                 intent = new Intent(c, SettingsActivity.class);
                 break;
             case KeyEvent.KEYCODE_ALL_APPS:
+            case KeyEvent.KEYCODE_BUTTON_6:   // the Apps button of Google TV remotes (its system handler is off)
                 intent = new Intent(c, HomeActivity.class).putExtra(HomeActivity.EXTRA_OPEN_APPS, true);
                 break;
             default:

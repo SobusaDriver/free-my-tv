@@ -242,6 +242,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private boolean sheetOpen, shelfEdited;
     /** The Apps key asked for the sheet; resume() opens it instead of closing it. */
     private boolean appsRequested;
+    /** One press can reach us twice (the key service and the window): don't toggle twice. */
+    private long appsKeyAt;
     private int gridIndex;
     private long toggledAt;
 
@@ -485,6 +487,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** The Apps key: opens the All Apps sheet, or closes it when it is already open. */
     void requestApps() {
+        long now = SystemClock.uptimeMillis();
+        if (now - appsKeyAt < 400) return;   // the same press, delivered twice
+        appsKeyAt = now;
         // Checked before running: a second press arrives while the intent transition has paused the view.
         if (sheetOpen) {
             closeSheet();

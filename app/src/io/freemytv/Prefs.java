@@ -125,6 +125,10 @@ final class Prefs {
     static boolean coin(int i) { return sp().getBoolean("coin" + i, true); }
     static void setCoin(int i, boolean on) { put("coin" + i, on); }
 
+    /** Prices in the currency from config.properties (on) or in dollars (off). */
+    static boolean localCurrency() { return sp().getBoolean("localCurrency", true); }
+    static void setLocalCurrency(boolean on) { put("localCurrency", on); }
+
     // MARK: - Shelf
 
     /** Packages on the home shelf, in order; null until the user edits it (then the built-in list applies). */

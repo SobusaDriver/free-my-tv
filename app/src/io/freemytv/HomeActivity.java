@@ -20,6 +20,12 @@ public class HomeActivity extends Activity {
     /** Remote's Menu button (KEYCODE_F9): context menu for the focused app. */
     static final String EXTRA_APP_MENU = "io.freemytv.extra.APP_MENU";
 
+    /** The Apps key arrives as ACTION_ALL_APPS when we are the TV's home app, or as our extra from the key service. */
+    private static boolean wantsApps(Intent intent) {
+        return intent != null && (intent.getBooleanExtra(EXTRA_OPEN_APPS, false)
+                || Intent.ACTION_ALL_APPS.equals(intent.getAction()));
+    }
+
     private HomeView home;
     private int prefsVersion = Prefs.version;   // settings changed while we were away: start over
 
@@ -42,7 +48,7 @@ public class HomeActivity extends Activity {
         home = new HomeView(this);
         setContentView(home);
         getWindow().setBackgroundDrawable(null);
-        if (getIntent() != null && getIntent().getBooleanExtra(EXTRA_OPEN_APPS, false)) home.requestApps();
+        if (wantsApps(getIntent())) home.requestApps();
         if (getIntent() != null && getIntent().getBooleanExtra(EXTRA_APP_MENU, false)) home.showAppMenu();
     }
 
@@ -66,7 +72,7 @@ public class HomeActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (home == null) return;
-        if (intent != null && intent.getBooleanExtra(EXTRA_OPEN_APPS, false)) home.requestApps();
+        if (wantsApps(intent)) home.requestApps();
         else if (intent != null && intent.getBooleanExtra(EXTRA_APP_MENU, false)) home.showAppMenu();
         else home.reset(true);
     }

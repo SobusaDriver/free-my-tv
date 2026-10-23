@@ -35,18 +35,24 @@ import java.util.concurrent.Executors;
 final class HomeData {
     static final String[] COINS = {"BTC", "ETH", "SOL", "USDT"};
     static final String[] COIN_NAMES = {"Bitcoin", "Ethereum", "Solana", "Dollar"};
-    private static final String CURRENCY = Config.CURRENCY.trim().toUpperCase(Locale.ROOT);
+    /** The currency prices are in: config.properties, or dollars when "Local currency" is off in Settings. */
+    static String currency() {
+        return Prefs.localCurrency() ? Config.CURRENCY.trim().toUpperCase(Locale.ROOT) : "USD";
+    }
     /** USD, EUR and BRL have direct Binance pairs; everything else (COP, MXN...) converts from USDT. */
-    private static final boolean DIRECT = CURRENCY.equals("USD") || CURRENCY.equals("EUR") || CURRENCY.equals("BRL");
-    private static final boolean NEEDS_FX = !DIRECT;
+    private static boolean needsFx() {
+        String c = currency();
+        return !(c.equals("USD") || c.equals("EUR") || c.equals("BRL"));
+    }
     /** The pair that turns USDT into the local currency (USDTCOP for Colombia). */
-    private static final String FX_SYMBOL = "USDT" + CURRENCY;
+    private static String fxSymbol() { return "USDT" + currency(); }
     /** Binance has no pairs in some currencies (INR...) and then refuses the whole request: prices go in dollars instead. */
     private static volatile boolean inDollars;
 
     /** Binance quotes dollars as USDT. */
     private static String quote() {
-        return CURRENCY.equals("USD") || NEEDS_FX || inDollars ? "USDT" : CURRENCY;
+        String c = currency();
+        return c.equals("USD") || needsFx() || inDollars ? "USDT" : c;
     }
     private static final String WEATHER_QUERY = "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset"
             + "&hourly=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=2";
@@ -79,7 +85,7 @@ final class HomeData {
         int[] tmp = new int[COINS.length];
         // The dollar only in reais, not in dollars: USDTUSDT isn't a pair, and Binance would refuse the whole request.
         // With an FX pair (COP...) the dollar card shows that rate instead.
-        for (int i = 0; i < COINS.length; i++) if (Prefs.coin(i) && (i < 3 || !dollars && (CURRENCY.equals("BRL") || NEEDS_FX))) tmp[n++] = i;
+        for (int i = 0; i < COINS.length; i++) if (Prefs.coin(i) && (i < 3 || !dollars && (currency().equals("BRL") || needsFx()))) tmp[n++] = i;
         a = java.util.Arrays.copyOf(tmp, n);
         activeCoins = a;
         activeVersion = Prefs.version;
@@ -119,14 +125,14 @@ final class HomeData {
     private static final String[] PRICE_HOSTS = {"https://api.binance.com", "https://api.binance.us"};
 
     private static String pricesPath() {
-        boolean fx = NEEDS_FX && !inDollars;
+        boolean fx = needsFx() && !inDollars;
         StringBuilder symbols = new StringBuilder();
         int[] coins = active();
         for (int i = 0; i < coins.length; i++) {
             if (fx && coins[i] == 3) continue;   // the FX pair below is the dollar's price
             symbols.append(symbols.length() == 0 ? "" : ",").append("%22").append(COINS[coins[i]]).append(quote()).append("%22");
         }
-        if (fx) symbols.append(symbols.length() == 0 ? "" : ",").append("%22").append(FX_SYMBOL).append("%22");
+        if (fx) symbols.append(symbols.length() == 0 ? "" : ",").append("%22").append(fxSymbol()).append("%22");
         return "/api/v3/ticker/24hr?type=MINI&symbols=%5B" + symbols + "%5D";
     }
 
@@ -180,9 +186,9 @@ final class HomeData {
 
     private HomeData(Context c) {
         cache = c.getSharedPreferences("homedata", Context.MODE_PRIVATE);
-        inDollars = CURRENCY.equals(cache.getString("dollarsFor", ""));
+        inDollars = currency().equals(cache.getString("dollarsFor", ""));
         try {
-            if (Prefs.quotes() && CURRENCY.equals(cache.getString("pricesCurrency", ""))) {
+            if (Prefs.quotes() && currency().equals(cache.getString("pricesCurrency", ""))) {
                 String p = cache.getString("prices", null);
                 if (p != null) parsePrices(p);
                 pricesAt = cache.getLong("pricesAt", 0);
@@ -211,16 +217,16 @@ final class HomeData {
                     try {
                         body = getPrices();
                     } catch (IOException e) {
-                        if (inDollars || CURRENCY.equals("USD") || !"HTTP 400".equals(e.getMessage())) throw e;
+                        if (inDollars || currency().equals("USD") || !"HTTP 400".equals(e.getMessage())) throw e;
                         inDollars = true;
-                        cache.edit().putString("dollarsFor", CURRENCY).apply();
-                        AppLog.w("prices: Binance has no " + CURRENCY + " pairs, using dollars");
+                        cache.edit().putString("dollarsFor", currency()).apply();
+                        AppLog.w("prices: Binance has no " + currency() + " pairs, using dollars");
                         body = getPrices();
                     }
                     parsePrices(body);
                     pricesAt = System.currentTimeMillis();
                     cache.edit().putString("prices", body).putLong("pricesAt", pricesAt)
-                            .putString("pricesCurrency", CURRENCY).apply();
+                            .putString("pricesCurrency", currency()).apply();
                     notifyListeners();
                 } catch (Exception e) {
                     pricesFailedAt = System.currentTimeMillis();
@@ -260,13 +266,13 @@ final class HomeData {
     private void parsePrices(String body) throws Exception {
         JSONArray list = new JSONArray(body);
         String quote = quote();
-        boolean fxOn = NEEDS_FX && !inDollars;
+        boolean fxOn = needsFx() && !inDollars;
         int found = 0;
         double fx = Double.NaN, fxOpen = Double.NaN;
         for (int i = 0; i < list.length(); i++) {
             JSONObject o = list.getJSONObject(i);
             String symbol = o.getString("symbol");
-            if (fxOn && symbol.equals(FX_SYMBOL)) {
+            if (fxOn && symbol.equals(fxSymbol())) {
                 fx = Double.parseDouble(o.optString("lastPrice", o.optString("price", "NaN")));
                 fxOpen = Double.parseDouble(o.optString("openPrice", "NaN"));
                 continue;
@@ -281,7 +287,7 @@ final class HomeData {
             }
         }
         if (fxOn) {
-            if (Double.isNaN(fx) || fx <= 0) throw new Exception("no " + FX_SYMBOL + " rate");
+            if (Double.isNaN(fx) || fx <= 0) throw new Exception("no " + fxSymbol() + " rate");
             for (int k = 0; k < 3; k++) if (!Double.isNaN(prices[k])) prices[k] *= fx;
             prices[3] = fx;
             changes[3] = fxOpen > 0 ? (fx - fxOpen) / fxOpen * 100 : Double.NaN;
@@ -445,13 +451,13 @@ final class HomeData {
     }
 
     private static String currencySymbol() {
-        switch (inDollars ? "USD" : CURRENCY) {
+        switch (inDollars ? "USD" : currency()) {
             case "USD": return "$";
             case "BRL": return "R$ ";
             case "EUR": return "€";
             case "GBP": return "£";
             case "JPY": return "¥";
-            default: return CURRENCY + " ";
+            default: return currency() + " ";
         }
     }
 
