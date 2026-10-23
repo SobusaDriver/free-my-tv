@@ -55,8 +55,6 @@ final class HomeApps {
     private HomeApps() {}
 
     static final int APP = 0, LIVE_TV = 1, INPUT = 2, ALL_APPS = 3, SETTINGS = 4, ANDROID_SETTINGS = 5;
-    /** Shortcuts to the TV's own Wi-Fi and Bluetooth screens. */
-    static final int WIFI = 8, BLUETOOTH = 9;
     /** The "HDMI Inputs" button: opens the bottom drawer on the inputs (the home screen handles it). */
     static final int INPUTS = 7;
     /** Image size of each card (16:9; on screen it shows up to ~330 px wide). */
@@ -189,10 +187,8 @@ final class HomeApps {
 
     // MARK: - Top buttons (the round ones at the top right)
 
-    static final String TOP_LIVE = "live", TOP_INPUTS = "inputs", TOP_SETTINGS = "settings",
-            TOP_WIFI = "wifi", TOP_BLUETOOTH = "bluetooth";
-    static final List<String> TOP_DEFAULT = Collections.unmodifiableList(java.util.Arrays.asList(
-            TOP_LIVE, TOP_INPUTS, TOP_WIFI, TOP_BLUETOOTH, TOP_SETTINGS));
+    static final String TOP_LIVE = "live", TOP_INPUTS = "inputs", TOP_SETTINGS = "settings";
+    static final List<String> TOP_DEFAULT = Collections.unmodifiableList(java.util.Arrays.asList(TOP_LIVE, TOP_INPUTS, TOP_SETTINGS));
     static final int MAX_TOP = TOP_DEFAULT.size();
 
     /** The keys of the top buttons, in order (Settings > Top Buttons; by default Live TV, HDMI Inputs, Settings). */
@@ -215,8 +211,6 @@ final class HomeApps {
         switch (key) {
             case TOP_LIVE: return action(LIVE_TV, TOP_LIVE, Ui.tr("light|Live TV"), "live_tv");
             case TOP_INPUTS: return action(INPUTS, TOP_INPUTS, Ui.tr("HDMI Inputs"), "hdmi");
-            case TOP_WIFI: return action(WIFI, TOP_WIFI, Ui.tr("Wi-Fi"), "wifi");
-            case TOP_BLUETOOTH: return action(BLUETOOTH, TOP_BLUETOOTH, Ui.tr("Bluetooth"), "bluetooth");
             default: return action(SETTINGS, TOP_SETTINGS, Ui.tr("light|Settings"), "settings");
         }
     }
@@ -432,14 +426,6 @@ final class HomeApps {
                 break;
             case ANDROID_SETTINGS:
                 intent = new Intent(Settings.ACTION_SETTINGS);
-                break;
-            case WIFI:
-                intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
-                plain = new Intent(Settings.ACTION_SETTINGS);   // a TV without the Wi-Fi screen still opens Settings
-                break;
-            case BLUETOOTH:
-                intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
-                plain = new Intent(Settings.ACTION_SETTINGS);
                 break;
             default:
                 return false;
