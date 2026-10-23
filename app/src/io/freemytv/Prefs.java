@@ -23,11 +23,22 @@ final class Prefs {
 
     /** Remote keys we handle, with the app each opens until the user picks another. Codes read from the TCL's log. */
     static final int KEY_NETFLIX = 4062, KEY_YOUTUBE = 190, KEY_PRIME = 4099, KEY_TCL_CHANNEL = 4020;
-    /** Kalley (MOKA/Realtek R10G): BUTTON_4, BUTTON_3 and BUTTON_8, from dumpsys window policy's mKeyMapping. */
+    /** Kalley (MOKA/Realtek R10G): BUTTON_4 and BUTTON_8, from dumpsys window policy's mKeyMapping. */
     static final int KEY_NETFLIX_KALLEY = KeyEvent.KEYCODE_BUTTON_4, KEY_PRIME_KALLEY = KeyEvent.KEYCODE_BUTTON_8;
-    /** Vestel's Netflix button: STEM_1, which the TV hands to its Netflix key receiver (dumpsys window policy). */
-    static final int KEY_VESTEL_NETFLIX = KeyEvent.KEYCODE_STEM_1;
-    static final int[] KEYS = RemoteKeys.VESTEL ? new int[] {KEY_VESTEL_NETFLIX}
+    /** The Netflix button on Vestel TVs and Formovie projectors: STEM_1, which the TV hands to its Netflix key receiver (dumpsys window policy). */
+    static final int KEY_STEM_NETFLIX = KeyEvent.KEYCODE_STEM_1;
+    /** KTC's (NextStar) Tabii button: BUTTON_8, which the TV hands to its hot-key receiver (its log: "keycode = 195"). */
+    static final int KEY_KTC_TABII = KeyEvent.KEYCODE_BUTTON_8;
+    /** Sony's app buttons, as SONY_KEY + scan code (read from a BRAVIA's log; the key codes are shared). */
+    static final int SONY_KEY = 100_000;
+    static final int KEY_SONY_CORE = SONY_KEY + 496, KEY_SONY_NETFLIX = SONY_KEY + 583, KEY_SONY_DISNEY = SONY_KEY + 491,
+            KEY_SONY_PRIME = SONY_KEY + 490, KEY_SONY_YOUTUBE = SONY_KEY + 485, KEY_SONY_CRUNCHYROLL = SONY_KEY + 507,
+            KEY_SONY_PLAY = SONY_KEY + 587;   // the Google Play button of older remotes: BUTTON_8 (BRAVIA 4K UR3, Android 10)
+    static final int[] KEYS = RemoteKeys.SONY
+            ? new int[] {KEY_SONY_CORE, KEY_SONY_NETFLIX, KEY_SONY_DISNEY, KEY_SONY_PRIME, KEY_SONY_YOUTUBE, KEY_SONY_CRUNCHYROLL,
+                    KEY_SONY_PLAY}
+            : RemoteKeys.STEM_NETFLIX ? new int[] {KEY_STEM_NETFLIX}
+            : RemoteKeys.KTC ? new int[] {KEY_KTC_TABII}
             : RemoteKeys.KALLEY ? new int[] {KEY_NETFLIX_KALLEY, KEY_YOUTUBE, KEY_PRIME_KALLEY}
             : new int[] {KEY_NETFLIX, KEY_YOUTUBE, KEY_PRIME, KEY_TCL_CHANNEL};
 
@@ -40,6 +51,11 @@ final class Prefs {
         app = c.getApplicationContext();
         migrateKeys();   // before anything reads the button choices
         Ui.applyLanguage();   // the language picked on the TV, now that it can be read
+    }
+
+    /** The app's context in this process (null before App.onCreate). */
+    static Context context() {
+        return app;
     }
 
     private static SharedPreferences sp() {
@@ -58,12 +74,11 @@ final class Prefs {
 
     // MARK: - Language and units
 
-    /** "auto", "pt", "en", "es", "de" or "ru". */
+    /** "auto" or a language code as picked ("pt", "fr", "zh-CN"…); Ui.applyLanguage finds its catalogue. */
     static String language() {
         String v = app == null ? Config.LANGUAGE : sp().getString("language", Config.LANGUAGE);
-        v = v.trim().toLowerCase(Locale.ROOT);
-        return v.startsWith("ru") ? "ru" : v.startsWith("pt") ? "pt" : v.startsWith("es") ? "es" : v.startsWith("de") ? "de"
-                : v.startsWith("en") ? "en" : "auto";
+        v = v.trim();
+        return v.isEmpty() || v.equalsIgnoreCase("auto") ? "auto" : v;
     }
 
     static void setLanguage(String v) { put("language", v); Ui.applyLanguage(); }
@@ -95,6 +110,10 @@ final class Prefs {
         version++;
     }
 
+    /** The home screen's soft click when moving and opening. */
+    static boolean sounds() { return sp().getBoolean("sounds", true); }
+    static void setSounds(boolean on) { put("sounds", on); }
+
     // MARK: - Widgets and coins
 
     static boolean weather() { return sp().getBoolean("weather", true); }
@@ -123,11 +142,31 @@ final class Prefs {
         put("shelf", sb.toString());
     }
 
+    // MARK: - Top buttons
+
+    /**
+     * The round buttons at the top right, in order: "live", "inputs" and/or "settings". null until the user edits
+     * them (then HomeApps.TOP_DEFAULT applies); empty when they took all three off.
+     */
+    static List<String> topButtons() {
+        String v = sp().getString("topButtons", null);
+        if (v == null) return null;
+        List<String> out = new ArrayList<>();
+        for (String p : v.split(",")) if (!p.isEmpty()) out.add(p);
+        return out;
+    }
+
+    static void setTopButtons(List<String> keys) {
+        StringBuilder sb = new StringBuilder();
+        for (String p : keys) sb.append(sb.length() == 0 ? "" : ",").append(p);
+        put("topButtons", sb.toString());
+    }
+
     // MARK: - Remote buttons
 
     private static String defaultApp(int keyCode) {
         switch (keyCode) {
-            case KEY_NETFLIX: case KEY_VESTEL_NETFLIX: case KEY_NETFLIX_KALLEY: return "com.netflix.ninja";
+            case KEY_NETFLIX: case KEY_STEM_NETFLIX: case KEY_NETFLIX_KALLEY: return "com.netflix.ninja";
             case KEY_YOUTUBE: return "com.google.android.youtube.tv";
             case KEY_PRIME: case KEY_PRIME_KALLEY: return "com.amazon.amazonvideo.livingroom";
             case KEY_TCL_CHANNEL: return "";
