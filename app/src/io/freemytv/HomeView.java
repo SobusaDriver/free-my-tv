@@ -2053,18 +2053,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         labels.add(Ui.tr("Close app"));
         actions.add(() -> closeItem(it));
 
-        List<String> packages = new ArrayList<>(HomeApps.shelfPackages(getContext()));
-        boolean onShelf = packages.contains(it.pkg);
-        if (onShelf) {
-            labels.add(Ui.tr("Remove from Home"));
-            actions.add(() -> shelfChanged(it, packages, false));
-        } else if (packages.size() < HomeApps.MAX_SHELF) {
-            labels.add(Ui.tr("Add to Home"));
-            actions.add(() -> shelfChanged(it, packages, true));
+        // The shelf on screen, not a package query: the same list the long press reads, and no wait on the Menu.
+        int at = -1, apps = 0;
+        for (int i = 0; i < shelf.size(); i++) {
+            if (shelf.get(i).kind != HomeApps.APP) continue;
+            apps++;
+            if (it.pkg.equals(shelf.get(i).pkg)) at = i;
         }
-        if (onShelf || packages.size() < HomeApps.MAX_SHELF) {
+        boolean onShelf = at >= 0;
+        final int onShelfAt = at;
+        if (onShelf || apps < HomeApps.MAX_SHELF) {
+            labels.add(onShelf ? Ui.tr("Remove from Home") : Ui.tr("Add to Home"));
+            actions.add(() -> toggleShelf(it));
+        }
+        if (onShelf) {
             labels.add(Ui.tr("Move"));
-            actions.add(() -> moveApp(it));
+            actions.add(() -> startReorder(onShelfAt));
         }
         labels.add(Ui.tr("App info"));
         actions.add(() -> appInfo(it));
@@ -2072,55 +2076,17 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         showListDialog(it.label, labels.toArray(new String[0]), (dialog, which) -> actions.get(which).run());
     }
 
-    /** Puts the app at the end of the shelf or takes it off. */
-    private void shelfChanged(HomeApps.Item it, List<String> packages, boolean on) {
-        if (on) packages.add(it.pkg); else packages.remove(it.pkg);
-        Prefs.setShelf(packages);
-        shelfEdited = true;
-        showToast(on ? Ui.trf("Added to the shelf: {app}", "app", it.label)
-                : Ui.trf("Removed from the shelf: {app}", "app", it.label));
-        reload();
-    }
-
-    /** Move: on the shelf, the interactive reorder; outside it, pick the slot to pin it in. */
-    private void moveApp(HomeApps.Item it) {
-        int at = -1;
-        for (int i = 0; i < shelf.size(); i++) if (it.pkg.equals(shelf.get(i).pkg)) { at = i; break; }
-        if (at >= 0) {
-            if (sheetOpen) closeSheet();
-            zone = Z_SHELF;
-            shelfIndex = at;
-            retarget(false);
-            if (shelf.size() < 2) {
-                showToast(Ui.tr("Add another app to reorder"));
-                return;
-            }
-            startReorder();
+    /** Puts the focus on a shelf tile and starts the reorder there. */
+    private void startReorder(int index) {
+        if (sheetOpen) closeSheet();
+        zone = Z_SHELF;
+        shelfIndex = index;
+        retarget(false);
+        if (shelf.size() < 2) {
+            showToast(Ui.tr("Add another app to reorder"));
             return;
         }
-        List<String> packages = new ArrayList<>(HomeApps.shelfPackages(getContext()));
-        if (packages.size() >= HomeApps.MAX_SHELF) {
-            showToast(Ui.tr("The shelf is full. Make room in Free My TV › Shelf."));
-            return;
-        }
-        String[] slots = new String[packages.size() + 1];
-        for (int i = 0; i <= packages.size(); i++) {
-            slots[i] = (i + 1) + " · " + (i < packages.size()
-                    ? Ui.trf("Before {app}", "app", shelfLabel(packages.get(i)))
-                    : Ui.tr("At the end"));
-        }
-        showListDialog(Ui.trf("Move {app}", "app", it.label), slots, (dialog, which) -> {
-            packages.add(which, it.pkg);
-            Prefs.setShelf(packages);
-            shelfEdited = true;
-            showToast(Ui.tr("Moved"));
-            reload();
-        });
-    }
-
-    private String shelfLabel(String pkg) {
-        for (HomeApps.Item item : shelf) if (pkg.equals(item.pkg)) return item.label;
-        return pkg;
+        startReorder();
     }
 
     /** A translucent, focused list dialog: the home screen stays visible behind it. */
@@ -2638,7 +2604,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (!canToggleShelf(gridIndex)) return;
         okHeld = true;
         toggledAt = SystemClock.uptimeMillis();
-        final HomeApps.Item it = others.get(gridIndex);
+        toggleShelf(others.get(gridIndex));
+    }
+
+    /** Puts the app at the end of the shelf or takes it off (the long press and the Menu share this). */
+    private void toggleShelf(HomeApps.Item it) {
         final Context c = getContext().getApplicationContext();
         click.open();
         LOADER.execute(() -> {
