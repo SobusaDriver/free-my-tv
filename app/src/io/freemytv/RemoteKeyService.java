@@ -1,6 +1,7 @@
 package io.freemytv;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.Intent;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 
@@ -10,6 +11,16 @@ import android.view.accessibility.AccessibilityEvent;
  */
 public class RemoteKeyService extends AccessibilityService {
     @Override protected boolean onKeyEvent(KeyEvent event) {
+        // Menu (F9) on the home screen: the focused app's context menu. Elsewhere the TV keeps its own handler.
+        if (event.getKeyCode() == KeyEvent.KEYCODE_F9 && RemoteKeys.KALLEY
+                && HomeActivity.class.getName().equals(RemoteKeys.topWindow)) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                startActivity(new Intent(this, HomeActivity.class)
+                        .putExtra(HomeActivity.EXTRA_APP_MENU, true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            }
+            return true;
+        }
         return RemoteKeys.onKey(this, event);
     }
 
