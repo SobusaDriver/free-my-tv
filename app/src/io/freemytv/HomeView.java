@@ -2,7 +2,11 @@ package io.freemytv;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
+import android.app.Dialog;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
@@ -11,30 +15,46 @@ import android.graphics.BitmapShader;
 import android.graphics.Matrix;
 import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.media.tv.TvInputManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.os.UserHandle;
+import android.provider.Settings;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextUtils;
+import android.util.TypedValue;
 import android.view.Choreographer;
+import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeProvider;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -2549,12 +2569,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** Puts the focused app at the end of the shelf, or takes it off if it's there; a toast says which. */
     private void toggleShelf() {
+        if (!canToggleShelf(gridIndex)) return;
+        toggleShelf(others.get(gridIndex));
+    }
+
+    /** Puts the app at the end of the shelf or takes it off (the hold in All Apps and the Menu share this). */
+    private void toggleShelf(HomeApps.Item it) {
         handler.removeCallbacks(holdStart);
         holdArmed = false;
-        if (!canToggleShelf(gridIndex)) return;
         okHeld = true;
         toggledAt = SystemClock.uptimeMillis();
-        final HomeApps.Item it = others.get(gridIndex);
         final Context c = getContext().getApplicationContext();
         click.open();
         LOADER.execute(() -> {
@@ -2588,6 +2612,266 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 reload();
             });
         });
+    }
+
+    // MARK: - App context menu (remote's Menu key)
+
+    /** Menu key on the focused shelf or All Apps tile: close the app, put it on the shelf or move it, or its info. */
+    void showAppMenu() {
+        HomeApps.Item it = focusedApp();
+        if (it == null) {
+            showToast(Ui.tr("Select an app"));
+            return;
+        }
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        labels.add(Ui.tr("Close app"));
+        actions.add(() -> closeItem(it));
+
+        // The shelf on screen, not a package query: the same list the hold reads, and no wait on the Menu.
+        int at = -1, apps = 0;
+        for (int i = 0; i < shelf.size(); i++) {
+            if (shelf.get(i).kind != HomeApps.APP) continue;
+            apps++;
+            if (it.pkg != null && it.pkg.equals(shelf.get(i).pkg)) at = i;
+        }
+        boolean onShelf = at >= 0;
+        final int onShelfAt = at;
+        if (onShelf || apps < HomeApps.maxShelf(getContext())) {
+            labels.add(onShelf ? Ui.tr("Remove from Home") : Ui.tr("Add to Home"));
+            actions.add(() -> toggleShelf(it));
+        }
+        if (onShelf) {
+            labels.add(Ui.tr("Move"));
+            actions.add(() -> startReorder(onShelfAt));
+        }
+        labels.add(Ui.tr("App info"));
+        actions.add(() -> appInfo(it));
+
+        showListDialog(it.label, labels.toArray(new String[0]), (dialog, which) -> actions.get(which).run());
+    }
+
+    /** Puts the focus on a shelf tile and starts the reorder there. */
+    private void startReorder(int index) {
+        if (sheetOpen) closeSheet();
+        zone = Z_SHELF;
+        shelfIndex = index;
+        retarget(false);
+        if (shelf.size() < 2) {
+            showToast(Ui.tr("Add another app to reorder"));
+            return;
+        }
+        startReorder();
+    }
+
+    /** A translucent, focused list dialog: the home screen stays visible behind it. */
+    private void showListDialog(String title, String[] items, DialogInterface.OnClickListener onClick) {
+        Dialog dialog = new Dialog(activity);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout panel = new LinearLayout(activity);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        panel.setPadding(pad, dp(14), pad, dp(14));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xE610141A);   // more opaque: the blurred home still reads through
+        bg.setCornerRadius(dp(22));
+        bg.setStroke(dp(1), 0x33FFFFFF);
+        panel.setBackground(bg);
+
+        TextView header = new TextView(activity);
+        header.setText(title);
+        header.setTextColor(Color.WHITE);
+        header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        header.setTypeface(Typeface.DEFAULT_BOLD);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(14), dp(6), dp(14), dp(14));
+        panel.addView(header);
+
+        TextView first = null;
+        for (int i = 0; i < items.length; i++) {
+            final int which = i;
+            TextView row = new TextView(activity);
+            row.setText(items[i]);
+            row.setTextColor(Color.WHITE);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), dp(13), dp(14), dp(13));
+            row.setFocusable(true);
+            row.setBackground(rowBackground());
+            row.setOnClickListener(v -> {
+                dialog.dismiss();
+                onClick.onClick(dialog, which);
+            });
+            panel.addView(row);
+            if (first == null) first = row;
+        }
+
+        dialog.setContentView(panel);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(0.35f);
+            if (Build.VERSION.SDK_INT >= 31) {   // background blur is Android 12+
+                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+                window.setBackgroundBlurRadius(dp(48));
+            }
+            window.setGravity(Gravity.CENTER);
+            window.setLayout(dp(560), WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+        if (first != null) panel.post(first::requestFocus);
+    }
+
+    private StateListDrawable rowBackground() {
+        StateListDrawable states = new StateListDrawable();
+        GradientDrawable focused = new GradientDrawable();
+        focused.setColor(0x40FFFFFF);
+        focused.setCornerRadius(dp(12));
+        states.addState(new int[] {android.R.attr.state_focused}, focused);
+        states.addState(new int[] {}, new ColorDrawable(Color.TRANSPARENT));
+        return states;
+    }
+
+    private int dp(float value) {
+        return Math.round(value * activity.getResources().getDisplayMetrics().density);
+    }
+
+    private void closeItem(HomeApps.Item it) {
+        showToast(Ui.trf("Closing {app}…", "app", it.label));
+        runAdb("am force-stop " + it.pkg, Ui.tr("App closed"),
+                Ui.trf("Couldn't close {app}", "app", it.label));
+    }
+
+    private void runAdb(String command, String success, String failure) {
+        new Thread(() -> {
+            String error = null;
+            try (Adb adb = Adb.connect(activity, 8000, null)) {
+                String out = adb.shell(command);
+                if (out.contains("Failure") || out.contains("Error") || out.contains("Exception")) error = out.trim();
+            } catch (IOException e) {
+                error = e.getMessage();
+            }
+            final String err = error;
+            activity.runOnUiThread(() -> {
+                if (err != null) showToast(failure + ": " + err);
+                else showToast(success);
+            });
+        }, "app-action").start();
+    }
+
+    private HomeApps.Item focusedApp() {
+        HomeApps.Item it = null;
+        if (sheetOpen) {
+            if (gridIndex >= 0 && gridIndex < others.size()) it = others.get(gridIndex);
+        } else if (zone == Z_SHELF && shelfIndex >= 0 && shelfIndex < shelf.size()) {
+            it = shelf.get(shelfIndex);
+        }
+        return it != null && it.kind == HomeApps.APP ? it : null;
+    }
+
+    private void appInfo(HomeApps.Item it) {
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + it.pkg));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            activity.startActivity(intent);
+        } catch (ActivityNotFoundException e) {
+            showToast(Ui.tr("No app info"));
+        }
+    }
+
+    // MARK: - Pointer (air mouse / touchpad click)
+
+    private float touchX, touchY;
+    private boolean touchMoved;
+
+    @Override public boolean onTouchEvent(MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                touchX = e.getX();
+                touchY = e.getY();
+                touchMoved = false;
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                if (Math.abs(e.getX() - touchX) + Math.abs(e.getY() - touchY) > 24 * k) touchMoved = true;
+                return true;
+            case MotionEvent.ACTION_UP:
+                if (touchMoved) return true;
+                performClick();
+                float x = e.getX(), y = e.getY();
+                if (sheetOpen) {
+                    int i = sheetIndexAt(x, y);
+                    if (i >= 0) {
+                        gridIndex = i;
+                        retargetGrid(false);
+                        click.open();
+                        activate();
+                    } else {
+                        closeSheet();
+                        retarget(false);
+                    }
+                    return true;
+                }
+                if (drawerOpen) {
+                    for (int i = 0; i < drawerItems.size() && i < drawerRects.length; i++) {
+                        if (drawerRects[i].contains(x, y)) {
+                            drawerIndex = i;
+                            zone = Z_DRAWER;
+                            retarget(false);
+                            click.open();
+                            activate();
+                            return true;
+                        }
+                    }
+                }
+                for (int i = 0; i < shelf.size() && i < tileRects.length; i++) {
+                    if (tileRects[i].contains(x, y)) {
+                        shelfIndex = i;
+                        zone = Z_SHELF;
+                        retarget(false);
+                        click.open();
+                        activate();
+                        return true;
+                    }
+                }
+                for (int i = 0; i < statusItems.size() && i < statusRects.length; i++) {
+                    if (statusRects[i].contains(x, y)) {
+                        statusIndex = i;
+                        zone = Z_STATUS;
+                        retarget(false);
+                        click.open();
+                        activate();
+                        return true;
+                    }
+                }
+                for (int i = 0; i < Math.min(topRects.length, 3 + lightButtons.size()); i++) {
+                    if (topRects[i].contains(x, y)) {
+                        topIndex = i;
+                        zone = Z_TOP;
+                        retarget(false);
+                        click.open();
+                        activate();
+                        return true;
+                    }
+                }
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    /** Tile index under a point in the All Apps sheet, or -1 (the same grid as drawGrid). */
+    private int sheetIndexAt(float x, float y) {
+        float gridWidth = COLUMNS * GRID_W + (COLUMNS - 1) * GRID_GAP;
+        float left = (1920 - gridWidth) / 2 * k;
+        float top = GRID_TOP * k - scroll.value * GRID_ROW * k;
+        float cw = GRID_W * k, ch = GRID_H * k, gap = GRID_GAP * k, rh = GRID_ROW * k;
+        for (int i = 0; i < others.size(); i++) {
+            float x0 = left + (i % COLUMNS) * (cw + gap);
+            float y0 = top + (i / COLUMNS) * rh;
+            if (x >= x0 && x <= x0 + cw && y >= y0 && y <= y0 + ch) return i;
+        }
+        return -1;
     }
 
     // MARK: - Moving apps on the shelf

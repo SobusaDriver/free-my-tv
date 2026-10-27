@@ -18,6 +18,8 @@ import android.widget.TextView;
 public class HomeActivity extends Activity {
     /** Opens All Apps (a remote's All Apps button, RemoteKeys). */
     static final String EXTRA_ALL_APPS = "io.freemytv.ALL_APPS";
+    /** The Menu key on the home screen: the context menu for the focused app. */
+    static final String EXTRA_APP_MENU = "io.freemytv.APP_MENU";
 
     /** The Apps key reaches us as ACTION_ALL_APPS (the system's way) or as our extra (RemoteKeys). */
     private static boolean wantsAllApps(Intent intent) {
@@ -50,6 +52,7 @@ public class HomeActivity extends Activity {
         setContentView(home);
         getWindow().setBackgroundDrawable(null);
         if (wantsAllApps(getIntent())) home.showAllApps();
+        if (getIntent().getBooleanExtra(EXTRA_APP_MENU, false)) home.showAppMenu();
     }
 
     @Override protected void onResume() {
@@ -80,6 +83,7 @@ public class HomeActivity extends Activity {
         super.onNewIntent(intent);
         if (home == null) return;
         if (wantsAllApps(intent)) home.showAllApps();
+        else if (intent != null && intent.getBooleanExtra(EXTRA_APP_MENU, false)) home.showAppMenu();
         else home.reset(true);
     }
 
@@ -97,6 +101,10 @@ public class HomeActivity extends Activity {
         if (RemoteKeys.onKey(this, event)) return true;
         if (event.getKeyCode() == KeyEvent.KEYCODE_ALL_APPS) {   // the Apps key, where no key service is on
             if (event.getAction() == KeyEvent.ACTION_DOWN && home != null) home.showAllApps();
+            return true;
+        }
+        if (event.getKeyCode() == KeyEvent.KEYCODE_F9 || event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && home != null) home.showAppMenu();
             return true;
         }
         if (home != null && home.onKey(event)) return true;
